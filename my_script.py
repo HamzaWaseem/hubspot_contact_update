@@ -21,14 +21,15 @@ mydb = psycopg2.connect(
 client_id = credentials.HUBSPOT_CLIENT_ID
 client_secret = credentials.HUBSPOT_CLIENT_SECRET
 redirect_url = credentials.HUBSPOT_REDIRECT_URL
-hubspot_base_url = credentials.HUBSPOT_BASE_URL
+base_url = credentials.HUBSPOT_BASE_URL
+authorization_code = credentials.HUBSPOT_AUTHORIZATION_CODE
+refresh_token = credentials.HUBSPOT_REFRESH_TOKEN
 
 
 class DBHandler:
-
     def __init__(self) -> None:
         pass
-    
+
     # Create tables if they do not exist
     def create_or_check_table(self):
         cursor = mydb.cursor()
@@ -37,7 +38,7 @@ class DBHandler:
         )
         mydb.commit()
         cursor.close()
-        print("Tables created successfully.")
+        print("Tables created/checked successfully.")
 
     # Create two random records in each table
     def create_random_record(self):
@@ -56,10 +57,10 @@ class DBHandler:
         )
         mydb.commit()
         cursor.close()
-        print("Records created successfully.")
-        return {"email": email, "first_name": first_name, last_name: last_name}
+        print("Record created successfully in db")
+        return {"email": email, "first_name": first_name, "last_name": last_name}
 
-    def update_hubspot_id_in_database(self,hubspot_id, email):
+    def update_hubspot_id_in_database(self, hubspot_id, email):
         cursor = mydb.cursor()
         cursor.execute(
             "UPDATE HamzaWaseem_Contact SET hubspot_id = "
@@ -70,23 +71,36 @@ class DBHandler:
         )
         mydb.commit()
         cursor.close()
-        print("Row updated successfully.")
+        print("Row updated successfully in database")
 
 
 class HubspotHandler:
-    
     def __init__(self) -> None:
         pass
 
-    # Get updated access token from HubSpot
-    def get_access_token(self): 
-        headers = {
-            "charset": "utf-8",
-            "Content-Type": "application/x-www-form-urlencoded",
+    # Get refresh token from HubSpot, I used this to get refresh token so added method here
+    # def get_refresh_token(self):
+    #     headers = {
+    #         "charset": "utf-8",
+    #         "Content-Type": "application/x-www-form-urlencoded",
+    #     }
+    #     url = f"{base_url}/oauth/v1/token?grant_type=authorization_code&client_id={client_id}&client_secret={client_secret}&redirect_uri={redirect_url}&code={authorization_code}"
+    #     response = requests.post(url, headers=headers)
+    #     refresh_token = response.json()["refresh_token"]
+    #     return refresh_token
+
+    # Get access token using Refresh token
+    def get_access_token(self):
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": {client_id},
+            "client_secret": {client_secret},
+            "redirect_uri": {redirect_url},
+            "refresh_token": {refresh_token},
         }
-        url = f"{hubspot_base_url}/oauth/v1/token?grant_type=authorization_code&client_id={client_id}&client_secret={client_secret}&redirect_uri={redirect_url}&code=code"
-        response = requests.post(url, headers=headers)
-        access_token = json.loads(response.text)["access_token"]
+        url = f"{base_url}/oauth/v1/token"
+        response = requests.post(url, data=data)
+        access_token = response.json()["access_token"]
         return access_token
 
     # Search for contact in HubSpot and create/update record
@@ -95,16 +109,18 @@ class HubspotHandler:
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
         }
-        url = f"{hubspot_base_url}/contacts/v1/contact/createOrUpdate/email/{email}/"
+        url = f"{base_url}/contacts/v1/contact/createOrUpdate/email/{email}/"
         data = {
             "properties": [
                 {"property": "firstname", "value": first_name},
                 {"property": "lastname", "value": last_name},
+                {"property": "email", "value": email},
             ]
         }
-        response = requests.post(url, data, headers=headers)
-        print("Updated contact on Hubspot")
-        return response["id"]
+        response = requests.post(url, data=json.dumps(data), headers=headers)
+        print("Created/Updated contact in Hubspot")
+        hubspot_id = response.json()["vid"]
+        return hubspot_id
 
 
 @app.task
@@ -126,35 +142,38 @@ def my_task():
             email=email,
             access_token=access_token,
         )
+        hubspot_id = str(hubspot_id)
         dbHandler.update_hubspot_id_in_database(hubspot_id, email)
-        print("Record added in DB and Hubspot successfully with id" + hubspot_id)
-        number_of_records +=1
+        print("Record added in DB and Hubspot successfully with id : " + hubspot_id)
+        number_of_records += 1
     print("===== Ending Task gracefully =====")
 
 
-def main():
-    print("===== Starting main =====")
-    dbHandler = DBHandler()
-    hubspotHandler = HubspotHandler()
-    dbHandler.create_or_check_table()
-    access_token = hubspotHandler.get_access_token()
-    number_of_records = 0
-    while number_of_records < 2:
-        record = dbHandler.create_random_record()
-        email = record["email"]
-        first_name = record["first_name"]
-        last_name = record["last_name"]
-        hubspot_id = hubspotHandler.create_or_update_contact(
-            first_name=first_name,
-            last_name=last_name,
-            email=email,
-            access_token=access_token,
-        )
-        dbHandler.update_hubspot_id_in_database(hubspot_id, email)
-        print("Record added in DB and Hubspot successfully with id" + hubspot_id)
-        number_of_records +=1
-    print("===== Ending main gracefully =====")
+# In case we use some other strategy instead of celery then we can use this main function 
+# def main():
+#     print("===== Starting main =====")
+#     dbHandler = DBHandler()
+#     hubspotHandler = HubspotHandler()
+#     dbHandler.create_or_check_table()
+#     access_token = hubspotHandler.get_access_token()
+#     number_of_records = 0
+#     while number_of_records < 2:
+#         record = dbHandler.create_random_record()
+#         email = record["email"]
+#         first_name = record["first_name"]
+#         last_name = record["last_name"]
+#         hubspot_id = hubspotHandler.create_or_update_contact(
+#             first_name=first_name,
+#             last_name=last_name,
+#             email=email,
+#             access_token=access_token,
+#         )
+#         hubspot_id = str(hubspot_id)
+#         dbHandler.update_hubspot_id_in_database(hubspot_id, email)
+#         print("Record added in DB and Hubspot successfully with id : " + hubspot_id)
+#         number_of_records += 1
+#     print("===== Ending main gracefully =====")
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
