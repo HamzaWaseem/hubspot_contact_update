@@ -4,3 +4,4 @@ faker==14.1.0
 celery==5.2.7
 Redis==4.4.2
 black==2.12.0
+pylint==2.15.10

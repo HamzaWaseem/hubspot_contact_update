@@ -1,19 +1,11 @@
-from datetime import timedelta
+from celery.schedules import crontab
 import credentials
 
-BROKER_URL = credentials.CELERY_BROKER_URL
-BROKER_TRANSPORT_OPTIONS = {
-    "fanout_prefix": True,
-    "fanout_patterns": True,
-    "visibility_timeout": 480,
-}
-CELERY_RESULT_BACKEND = BROKER_URL
+CELERY_RESULT_BACKEND = credentials.CELERY_BROKER_URL
 
 CELERYBEAT_SCHEDULE = {
     "mytask-every-15-minutes": {
-        "task": "tasks.my_task",  # notice that the complete name is needed
-        "schedule": timedelta(minutes=2),
+        "task": "my_script.my_task",  # notice that the complete name is needed
+        "schedule": crontab(minute="*/3"),
     },
 }
-
-CELERY_TIMEZONE = "UTC"
